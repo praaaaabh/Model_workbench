@@ -1,4 +1,4 @@
-import { DatasetResponse } from "../types/datasets";
+import { DatasetProfileResponse, DatasetResponse } from "../types/datasets";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
@@ -58,4 +58,43 @@ export const updateDatasetMapping = async (
   }
 
   return response.json();
+};
+
+export const requestDatasetProfile = async (
+  datasetId: string,
+): Promise<DatasetProfileResponse> => {
+  const response = await fetch(`${API_BASE_URL}/datasets/${datasetId}/profile`, {
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "Failed to start profiling");
+  }
+
+  return response.json();
+};
+
+export const getDatasetProfile = async (
+  datasetId: string,
+): Promise<DatasetProfileResponse> => {
+  const response = await fetch(`${API_BASE_URL}/datasets/${datasetId}/profile`);
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "Failed to fetch profile");
+  }
+
+  return response.json();
+};
+
+export const downloadDatasetProfile = async (datasetId: string): Promise<Blob> => {
+  const response = await fetch(`${API_BASE_URL}/datasets/${datasetId}/profile/artifact`);
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "Unable to download profile report");
+  }
+
+  return response.blob();
 };
