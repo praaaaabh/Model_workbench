@@ -1,8 +1,7 @@
 import { createBrowserRouter } from "react-router-dom";
 
 import { AppLayout } from "../components/AppLayout";
-
-const Home = () => <div>Welcome to Model Workbench</div>;
+import { Home } from "./Home";
 
 export const router = createBrowserRouter([
   {
