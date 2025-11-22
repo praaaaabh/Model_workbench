@@ -1,10 +1,11 @@
 from fastapi.testclient import TestClient
 
-from app.main import app, dataset_store
+from app.main import app, dataset_store, target_store
 
 
 def setup_function() -> None:
     dataset_store.clear()
+    target_store.clear()
 
 
 def test_create_dataset_infers_schema() -> None:
@@ -26,6 +27,7 @@ def test_create_dataset_infers_schema() -> None:
     ]
     assert payload["mapping"] == {}
     assert payload["suggestions"]["age"] == "age"
+    assert payload["version"] == 1
 
 
 def test_update_and_fetch_mapping() -> None:
@@ -42,6 +44,7 @@ def test_update_and_fetch_mapping() -> None:
     assert mapping_response.status_code == 200
     mapping_payload = mapping_response.json()
     assert mapping_payload["suggestions"]["patient_id"] == "patient_id"
+    assert mapping_payload["version"] == 1
 
     update_response = client.put(
         f"/datasets/{dataset_id}/mapping",
@@ -54,6 +57,8 @@ def test_update_and_fetch_mapping() -> None:
         "patient_id": "patient_identifier",
         "glucose": "fasting_glucose",
     }
+    assert updated["version"] == 2
 
     round_trip = client.get(f"/datasets/{dataset_id}/mapping")
     assert round_trip.json()["mapping"]["glucose"] == "fasting_glucose"
+    assert round_trip.json()["version"] == 2

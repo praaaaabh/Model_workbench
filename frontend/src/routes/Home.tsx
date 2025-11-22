@@ -7,6 +7,7 @@ import { getDatasetMapping } from "../api/datasets";
 import { DatasetUploadCard } from "../components/DatasetUploadCard";
 import { MappingEditor } from "../components/MappingEditor";
 import { SchemaPreviewTable } from "../components/SchemaPreviewTable";
+import { TargetBuilder } from "../components/TargetBuilder";
 import { DatasetResponse } from "../types/datasets";
 
 export const Home = () => {
@@ -49,6 +50,7 @@ export const Home = () => {
               mapping={mappingQuery.data.mapping}
               suggestions={mappingQuery.data.suggestions}
             />
+            <TargetBuilder dataset={mappingQuery.data} />
           </Box>
         )}
       </Stack>
