@@ -16,6 +16,13 @@ export const AppLayout = () => {
           </Typography>
           <Typography
             component={RouterLink}
+            to="/models"
+            sx={{ color: "inherit", textDecoration: "none", mr: 2 }}
+          >
+            Models
+          </Typography>
+          <Typography
+            component={RouterLink}
             to="/about"
             sx={{ color: "inherit", textDecoration: "none" }}
           >
