@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, File, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 DATA_DIR = Path(__file__).parent / "data"
@@ -36,9 +36,12 @@ class DatasetRecord(BaseModel):
     id: str
     filename: str
     stored_path: Path
+    standardized_path: Path | None = None
     columns: list[ColumnSchema]
     mapping: dict[str, str]
     suggestions: dict[str, str]
+    column_types: dict[str, str]
+    standardization_status: "StandardizationStatus | None" = None
 
 
 class DatasetResponse(BaseModel):
@@ -47,10 +50,39 @@ class DatasetResponse(BaseModel):
     columns: list[ColumnSchema]
     mapping: dict[str, str]
     suggestions: dict[str, str]
+    column_types: dict[str, str]
+    standardization_status: "StandardizationStatus | None" = None
 
 
 class UpdateMappingRequest(BaseModel):
     mapping: dict[str, str]
+
+
+class StandardizeRequest(BaseModel):
+    column_types: dict[str, str]
+
+
+class ErrorSample(BaseModel):
+    row: int
+    column: str
+    value: str
+    error: str
+
+
+class StandardizationStatus(BaseModel):
+    status: str
+    progress: int
+    message: str | None = None
+    rows_total: int = 0
+    rows_processed: int = 0
+    rows_with_errors: int = 0
+    error_samples: list[ErrorSample] = Field(default_factory=list)
+    output_filename: str | None = None
+    audit_log: list[str] = Field(default_factory=list)
+
+
+DatasetRecord.model_rebuild()
+DatasetResponse.model_rebuild()
 
 
 class DatasetStore:
@@ -70,6 +102,18 @@ class DatasetStore:
         record.mapping = mapping
         self._records[dataset_id] = record
         return record
+
+    def update_column_types(self, dataset_id: str, column_types: dict[str, str]) -> DatasetRecord:
+        record = self.get(dataset_id)
+        record.column_types = column_types
+        self._records[dataset_id] = record
+        return record
+
+    def set_status(self, dataset_id: str, status: StandardizationStatus) -> StandardizationStatus:
+        record = self.get(dataset_id)
+        record.standardization_status = status
+        self._records[dataset_id] = record
+        return status
 
     def clear(self) -> None:
         self._records = {}
@@ -148,6 +192,108 @@ def save_upload_file(upload_file: UploadFile, dataset_id: str) -> Path:
     return stored_path
 
 
+def _convert_value(value: str, target_type: str) -> tuple[str | int | float, str | None]:
+    if value == "":
+        return "", None
+
+    try:
+        if target_type == "integer":
+            return int(value), None
+        if target_type == "float":
+            return float(value), None
+    except ValueError as error:  # pragma: no cover - handled by error path
+        return value, str(error)
+
+    return value, None
+
+
+def standardize_dataset(record: DatasetRecord, column_types: dict[str, str]) -> StandardizationStatus:
+    status = StandardizationStatus(
+        status="running",
+        progress=0,
+        message="Starting standardization",
+        audit_log=["Standardization started"],
+    )
+    dataset_store.set_status(record.id, status)
+
+    try:
+        output_path = DATA_DIR / f"{record.id}_standardized.csv"
+        error_samples: list[ErrorSample] = []
+        rows_processed = 0
+        rows_with_errors = 0
+
+        with record.stored_path.open("r", newline="", encoding="utf-8") as source, output_path.open(
+            "w", newline="", encoding="utf-8"
+        ) as target:
+            reader = csv.DictReader(source)
+            if reader.fieldnames is None:
+                raise ValueError("Unable to read CSV header for standardization")
+
+            unknown_columns = [name for name in column_types.keys() if name not in reader.fieldnames]
+            if unknown_columns:
+                raise ValueError(f"Unknown columns in column_types: {', '.join(unknown_columns)}")
+
+            fieldnames = [record.mapping.get(name, name) for name in reader.fieldnames]
+            writer = csv.DictWriter(target, fieldnames=fieldnames)
+            writer.writeheader()
+
+            for row_index, row in enumerate(reader, start=1):
+                rows_processed += 1
+                converted_row: dict[str, str | int | float] = {}
+
+                for original_name, value in row.items():
+                    target_name = record.mapping.get(original_name, original_name)
+                    target_type = column_types.get(original_name, record.column_types.get(original_name, "string"))
+                    converted, error = _convert_value(value or "", target_type)
+
+                    if error and len(error_samples) < 5:
+                        error_samples.append(
+                            ErrorSample(
+                                row=row_index,
+                                column=original_name,
+                                value=value or "",
+                                error=error,
+                            )
+                        )
+                    if error:
+                        rows_with_errors += 1
+
+                    converted_row[target_name] = converted
+
+                writer.writerow(converted_row)
+
+        status = StandardizationStatus(
+            status="completed",
+            progress=100,
+            message="Standardization finished",
+            rows_total=rows_processed,
+            rows_processed=rows_processed,
+            rows_with_errors=rows_with_errors,
+            error_samples=error_samples,
+            output_filename=output_path.name,
+            audit_log=["Standardization completed"],
+        )
+        dataset_store.update_column_types(record.id, column_types)
+        dataset_store.set_status(record.id, status)
+        record.standardization_status = status
+        record.standardized_path = output_path if hasattr(record, "standardized_path") else output_path
+        return status
+    except Exception as exc:  # pragma: no cover - defensive programming
+        failure_status = StandardizationStatus(
+            status="failed",
+            progress=100,
+            message=str(exc),
+            rows_total=status.rows_total,
+            rows_processed=status.rows_processed,
+            rows_with_errors=status.rows_with_errors,
+            error_samples=status.error_samples,
+            output_filename=status.output_filename,
+            audit_log=status.audit_log + [f"Failed: {exc}"],
+        )
+        dataset_store.set_status(record.id, failure_status)
+        return failure_status
+
+
 def get_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     app = FastAPI(title="Model Workbench API")
@@ -179,9 +325,12 @@ def get_app() -> FastAPI:
             id=dataset_id,
             filename=file.filename,
             stored_path=stored_path,
+            standardized_path=None,
             columns=columns,
             mapping={},
             suggestions=suggestions,
+            column_types={column.name: column.inferred_type for column in columns},
+            standardization_status=None,
         )
         dataset_store.add(record)
 
@@ -191,6 +340,8 @@ def get_app() -> FastAPI:
             columns=record.columns,
             mapping=record.mapping,
             suggestions=record.suggestions,
+            column_types=record.column_types,
+            standardization_status=record.standardization_status,
         )
 
     @app.get("/datasets/{dataset_id}/mapping", response_model=DatasetResponse)
@@ -206,6 +357,8 @@ def get_app() -> FastAPI:
             columns=record.columns,
             mapping=record.mapping,
             suggestions=record.suggestions,
+            column_types=record.column_types,
+            standardization_status=record.standardization_status,
         )
 
     @app.put("/datasets/{dataset_id}/mapping", response_model=DatasetResponse)
@@ -231,6 +384,43 @@ def get_app() -> FastAPI:
             columns=updated.columns,
             mapping=updated.mapping,
             suggestions=updated.suggestions,
+            column_types=updated.column_types,
+            standardization_status=updated.standardization_status,
+        )
+
+    @app.post("/datasets/{dataset_id}/standardize", response_model=StandardizationStatus)
+    async def standardize(dataset_id: str, payload: StandardizeRequest) -> StandardizationStatus:
+        try:
+            record = dataset_store.get(dataset_id)
+        except KeyError:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+
+        valid_columns = {column.name for column in record.columns}
+        invalid = [name for name in payload.column_types.keys() if name not in valid_columns]
+        if invalid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unknown columns in column_types: {', '.join(invalid)}",
+            )
+
+        status_result = standardize_dataset(record, payload.column_types)
+        return status_result
+
+    @app.get("/datasets/{dataset_id}/standardize/status", response_model=StandardizationStatus)
+    async def get_standardization_status(dataset_id: str) -> StandardizationStatus:
+        try:
+            record = dataset_store.get(dataset_id)
+        except KeyError:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+
+        if record.standardization_status:
+            return record.standardization_status
+
+        return StandardizationStatus(
+            status="pending",
+            progress=0,
+            message="No standardization has been run",
+            audit_log=[],
         )
 
     return app

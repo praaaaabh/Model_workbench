@@ -57,3 +57,33 @@ def test_update_and_fetch_mapping() -> None:
 
     round_trip = client.get(f"/datasets/{dataset_id}/mapping")
     assert round_trip.json()["mapping"]["glucose"] == "fasting_glucose"
+
+
+def test_standardize_dataset_tracks_status_and_errors() -> None:
+    client = TestClient(app)
+    file_content = "age,height\n30,170\nunknown,abc\n"
+
+    create_response = client.post(
+        "/datasets",
+        files={"file": ("sample.csv", file_content, "text/csv")},
+    )
+    dataset_id = create_response.json()["id"]
+
+    standardize_response = client.post(
+        f"/datasets/{dataset_id}/standardize",
+        json={"column_types": {"age": "integer", "height": "float"}},
+    )
+
+    assert standardize_response.status_code == 200
+    payload = standardize_response.json()
+    assert payload["status"] == "completed"
+    assert payload["rows_total"] == 2
+    assert payload["rows_with_errors"] >= 1
+    assert payload["output_filename"].endswith("_standardized.csv")
+    assert len(payload["error_samples"]) >= 1
+
+    status_response = client.get(f"/datasets/{dataset_id}/standardize/status")
+    assert status_response.status_code == 200
+    status_payload = status_response.json()
+    assert status_payload["status"] == "completed"
+    assert status_payload["rows_processed"] == 2
