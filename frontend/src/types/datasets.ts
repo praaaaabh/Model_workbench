@@ -6,6 +6,7 @@ export interface ColumnSchema {
 export interface DatasetResponse {
   id: string;
   filename: string;
+  version: number;
   columns: ColumnSchema[];
   mapping: Record<string, string>;
   suggestions: Record<string, string>;
