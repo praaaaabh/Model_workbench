@@ -1,4 +1,4 @@
-import { DatasetResponse } from "../types/datasets";
+import { DatasetResponse, StandardizationStatus } from "../types/datasets";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
@@ -55,6 +55,35 @@ export const updateDatasetMapping = async (
   if (!response.ok) {
     const message = await response.text();
     throw new Error(message || "Failed to update mapping");
+  }
+
+  return response.json();
+};
+
+export const standardizeDataset = async (
+  datasetId: string,
+  columnTypes: Record<string, string>,
+): Promise<StandardizationStatus> => {
+  const response = await fetch(`${API_BASE_URL}/datasets/${datasetId}/standardize`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ column_types: columnTypes }),
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || "Failed to standardize dataset");
+  }
+
+  return response.json();
+};
+
+export const fetchStandardizationStatus = async (
+  datasetId: string,
+): Promise<StandardizationStatus> => {
+  const response = await fetch(`${API_BASE_URL}/datasets/${datasetId}/standardize/status`);
+  if (!response.ok) {
+    throw new Error("Failed to fetch standardization status");
   }
 
   return response.json();

@@ -7,6 +7,7 @@ import { getDatasetMapping } from "../api/datasets";
 import { DatasetUploadCard } from "../components/DatasetUploadCard";
 import { MappingEditor } from "../components/MappingEditor";
 import { SchemaPreviewTable } from "../components/SchemaPreviewTable";
+import { StandardizationPanel } from "../components/StandardizationPanel";
 import { DatasetResponse } from "../types/datasets";
 
 export const Home = () => {
@@ -48,6 +49,12 @@ export const Home = () => {
               columns={mappingQuery.data.columns}
               mapping={mappingQuery.data.mapping}
               suggestions={mappingQuery.data.suggestions}
+            />
+            <StandardizationPanel
+              datasetId={mappingQuery.data.id}
+              columns={mappingQuery.data.columns}
+              columnTypes={mappingQuery.data.column_types}
+              standardizationStatus={mappingQuery.data.standardization_status}
             />
           </Box>
         )}
