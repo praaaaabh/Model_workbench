@@ -6,6 +6,7 @@ __pycache__/
 # Node
 node_modules/
 dist/
+backend/app/data/
 
 # macOS
 .DS_Store
